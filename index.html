@@ -1,95 +1,58 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UNIQUE AI</title>
-<style>
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font-family: Arial, sans-serif;
-  background: #101522;
-  color: white;
-}
-header {
-  padding: 20px;
-  background: #192235;
-  font-size: 23px;
-  font-weight: bold;
-}
-#chat {
-  padding: 18px;
-  height: calc(100vh - 150px);
-  overflow-y: auto;
-}
-.msg {
-  padding: 13px;
-  margin: 12px 0;
-  border-radius: 12px;
-  line-height: 1.5;
-  max-width: 90%;
-}
-.user { background: #2855a5; margin-left: auto; }
-.ai { background: #263247; }
-.bottom {
-  position: fixed;
-  bottom: 0;
-  width: 100%;
-  display: flex;
-  padding: 12px;
-  background: #192235;
-  gap: 8px;
-}
-input {
-  flex: 1;
-  padding: 14px;
-  border-radius: 25px;
-  border: 0;
-  font-size: 16px;
-}
-button {
-  border: 0;
-  border-radius: 25px;
-  padding: 12px 18px;
-  background: #3978ef;
-  color: white;
-  font-size: 16px;
-}
-</style>
-</head>
-<body>
-<header>🤖 UNIQUE AI</header>
-<div id="chat">
-  <div class="msg ai">
-    வணக்கம்! UNIQUE AI-க்கு வரவேற்கிறேன்.
-    உங்களுக்கு என்ன உதவி வேண்டும்?
-  </div>
-</div>
-<div class="bottom">
-  <input id="message" placeholder="Ask anything...">
-  <button onclick="sendMessage()">➤</button>
-</div>
-<script>
-function sendMessage() {
-  const input = document.getElementById("message");
-  const chat = document.getElementById("chat");
-  const msg = input.value.trim();
-  if (!msg) return;
+import express from "express";
+import OpenAI from "openai";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-  const user = document.createElement("div");
-  user.className = "msg user";
-  user.textContent = msg;
-  chat.appendChild(user);
+const app = express();
+const port = process.env.PORT || 3000;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-  const ai = document.createElement("div");
-  ai.className = "msg ai";
-  ai.textContent = "AI connection விரைவில் இணைக்கப்படும்!";
-  chat.appendChild(ai);
+app.use(express.json({ limit: "32kb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
-  input.value = "";
-  chat.scrollTop = chat.scrollHeight;
-}
-</script>
-</body>
-</html>
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { message, language = "auto", history = [] } = req.body ?? {};
+    if (typeof message !== "string" || !message.trim() || message.length > 4000) {
+      return res.status(400).json({ error: "Please send a message under 4000 characters." });
+    }
+
+    const safeHistory = Array.isArray(history)
+      ? history.slice(-12).filter(
+          item => item &&
+            ["user", "assistant"].includes(item.role) &&
+            typeof item.content === "string"
+        ).map(item => ({ role: item.role, content: item.content.slice(0, 4000) }))
+      : [];
+
+    const languageInstruction = language === "auto"
+      ? "Reply in the same language as the user's latest message. If they mix languages, respond naturally in the same mix."
+      : `Reply in ${String(language).slice(0, 40)}.`;
+
+    const response = await client.responses.create({
+      model: process.env.OPENAI_MODEL || "gpt-5.5",
+      instructions:
+        "You are UNIQUE AI, a friendly, helpful, age-appropriate multilingual learning assistant. " +
+        languageInstruction +
+        " Give clear, accurate answers. For educational questions, explain step by step at an appropriate level. " +
+        "Do not claim to have capabilities you do not have.",
+      input: [
+        ...safeHistory,
+        { role: "user", content: message.trim() }
+      ]
+    });
+
+    res.json({ reply: response.output_text || "Sorry, I could not form a reply. Please try again." });
+  } catch (error) {
+    console.error("Chat API error:", error?.message || error);
+    res.status(500).json({ error: "AI service is temporarily unavailable. Please try again later." });
+  }
+});
+
+app.get("/health", (_req, res) => res.json({ ok: true, app: "UNIQUE AI" }));
+
+app.listen(port, () => {
+  console.log(`UNIQUE AI server running on port ${port}`);
+});
